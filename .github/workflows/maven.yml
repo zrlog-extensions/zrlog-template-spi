@@ -1,0 +1,41 @@
+name: Maven verification and Central publication
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+      - run: ./mvnw -B verify
+      - name: Verify immutable release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(./mvnw -q help:evaluate -Dexpression=project.version -DforceStdout)
+          test "$GITHUB_REF_NAME" = "v$version"
+          [[ "$version" != *SNAPSHOT* ]]
+      - name: Import signing key
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+      - name: Publish to Maven Central
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          CENTRAL_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: ./mvnw -B -Pcentral-release deploy
